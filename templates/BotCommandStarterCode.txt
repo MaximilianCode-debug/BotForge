@@ -1,0 +1,6 @@
+@echo off
+cd /d C:\Users\Owner\Desktop\BotForgePlatform
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\venv\Scripts\activate
+python app.py
+pause

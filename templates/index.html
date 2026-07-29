@@ -1,0 +1,128 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BotForge – Deploy Your AI Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { background: #f8f9fa; }
+        .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3rem 0; }
+        .card-shadow { box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#"><i class="fas fa-robot text-primary me-2"></i>BotForge</a>
+            <span class="badge bg-info text-dark">⚡ Powered by Groq</span>
+            <a href="/login" class="btn btn-outline-primary btn-sm ms-3">
+                <i class="fas fa-sign-in-alt me-1"></i>Login
+            </a>
+        </div>
+    </nav>
+
+    <section class="hero text-center">
+        <div class="container py-4">
+            <h1 class="display-4 fw-bold">Launch Your AI Business Bot</h1>
+            <p class="lead">in under 2 minutes – no coding required</p>
+        </div>
+    </section>
+
+    <div class="container my-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card card-shadow border-0">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0"><i class="fas fa-rocket me-2"></i>Deploy Your Bot</h4>
+                    </div>
+                    <div class="card-body p-4">
+                        <div id="statusMessage" class="alert d-none"></div>
+                        <form id="registerForm">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-store text-success me-1"></i> Business Name</label>
+                                <input type="text" id="businessName" class="form-control" placeholder="e.g., Chai Cafe Delhi" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-file-alt text-primary me-1"></i> Business Description</label>
+                                <textarea id="businessContext" rows="4" class="form-control" placeholder="Describe your products, hours, location, etc." required></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fab fa-telegram text-info me-1"></i> Telegram Bot Token</label>
+                                <input type="text" id="botToken" class="form-control" placeholder="e.g., 123456:ABC-DEF..." required>
+                                <div class="form-text">Get your token from <a href="https://t.me/botfather" target="_blank">@BotFather</a> on Telegram.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-lock text-danger me-1"></i> Set Password</label>
+                                <input type="password" id="password" class="form-control" placeholder="Create a password for your account" required>
+                                <div class="form-text">Use this password to login later.</div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-lg w-100"><i class="fas fa-play me-2"></i>Deploy My Business</button>
+                        </form>
+                        <div class="text-center mt-4">
+                            <p class="mb-0">Already have an account? <a href="/login"><strong>Login here</strong></a></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-5 text-center">
+                    <div class="col-md-4"><i class="fas fa-phone-alt fa-2x text-primary mb-2"></i><h5>1. Create Bot</h5><p class="text-muted">Talk to @BotFather</p></div>
+                    <div class="col-md-4"><i class="fas fa-pen-fancy fa-2x text-primary mb-2"></i><h5>2. Register</h5><p class="text-muted">Enter your info</p></div>
+                    <div class="col-md-4"><i class="fas fa-chart-line fa-2x text-primary mb-2"></i><h5>3. Manage</h5><p class="text-muted">Dashboard with inbox & analytics</p></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center text-muted py-4 border-top">
+        <p class="mb-0">© 2026 BotForge — Built with ❤️</p>
+    </footer>
+
+    <script>
+        const form = document.getElementById('registerForm');
+        const statusDiv = document.getElementById('statusMessage');
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = 'alert ' + (type === 'success' ? 'alert-success' : 'alert-danger');
+            statusDiv.classList.remove('d-none');
+        }
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const business_name = document.getElementById('businessName').value.trim();
+            const business_context = document.getElementById('businessContext').value.trim();
+            const bot_token = document.getElementById('botToken').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            if (!business_name || !business_context || !bot_token || !password) {
+                showStatus('Please fill in all fields.', 'error');
+                return;
+            }
+            if (password.length < 6) {
+                showStatus('Password must be at least 6 characters.', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ business_name, business_context, bot_token, password })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showStatus('✅ Deployment successful! Redirecting...', 'success');
+                    setTimeout(function() {
+                        window.location.href = data.redirect;
+                    }, 1500);
+                } else {
+                    showStatus('❌ ' + (data.error || 'Something went wrong.'), 'error');
+                }
+            } catch (err) {
+                showStatus('❌ Network error. Is the server running?', 'error');
+            }
+        });
+    </script>
+</body>
+</html>

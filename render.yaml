@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: botforge
+    runtime: python
+    repo: https://github.com/YOUR_USERNAME/BotForge  # Replace with your repo URL
+    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama3-70b-8192
+      - key: SECRET_KEY
+        generateValue: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
