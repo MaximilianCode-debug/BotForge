@@ -1,4 +1,4 @@
-import os
+ import os
 import sqlite3
 import threading
 import asyncio
@@ -17,16 +17,17 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
-    raise ValueError("Missing GROQ_API_KEY in .env")
+    raise ValueError("Missing GROQ_API_KEY in environment variables")
 
 DB_PATH = "database.db"
 
-# ---------- DATABASE ----------
+# ---------- DATABASE HELPERS ----------
 def get_db():
-    """Get database connection and create tables if they don't exist."""
+    """Get database connection and ensure tables exist (for Render's ephemeral storage)."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-
+    
+    # Create tables if they don't exist – runs on every request
     with conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS businesses (
@@ -52,9 +53,9 @@ def get_db():
                 FOREIGN KEY (business_id) REFERENCES businesses(id)
             )
         ''')
-
     return conn
 
+# ---------- DB OPERATIONS ----------
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -157,7 +158,6 @@ def get_conversation_history(business_id, chat_id, limit=5):
             """,
             (business_id, str(chat_id), limit * 2)
         ).fetchall()
-
     rows = list(reversed(rows))
     history = []
     for row in rows:
@@ -167,7 +167,7 @@ def get_conversation_history(business_id, chat_id, limit=5):
             history.append({'role': 'assistant', 'content': row['bot_response']})
     return history
 
-# ---------- GROQ HELPER ----------
+# ---------- GROQ ----------
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
 async def ask_groq(messages: list, business_context: str) -> str:
@@ -189,7 +189,7 @@ async def ask_groq(messages: list, business_context: str) -> str:
         print(f"Groq error: {e}")
         return "⚠️ AI service temporarily unavailable. Please try later."
 
-# ---------- TELEGRAM BOT FACTORY ----------
+# ---------- TELEGRAM BOT ----------
 running_bots = {}
 
 def create_bot_app(token, business_id):
@@ -232,7 +232,6 @@ def create_bot_app(token, business_id):
             return
 
         history = get_conversation_history(business_id, chat_id, limit=5)
-
         messages = []
         for entry in history:
             messages.append({"role": entry['role'], "content": entry['content']})
@@ -260,7 +259,6 @@ def start_bot_thread(token, business_id):
             app.run_polling(allowed_updates=Update.ALL_TYPES)
         else:
             print(f"❌ Failed to start bot for business {business_id}")
-
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return thread
@@ -268,21 +266,6 @@ def start_bot_thread(token, business_id):
 # ---------- FLASK APP ----------
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-
-# ---------- STARTUP (RUNS ON IMPORT) ----------
-# Initialize database
-with app.app_context():
-    get_db()  # This creates tables if they don't exist
-    print("✅ Database initialized")
-
-# Start active bots
-with get_db() as conn:
-    rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
-    for row in rows:
-        try:
-            start_bot_thread(row['bot_token'], row['id'])
-        except Exception as e:
-            print(f"⚠️ Failed to start bot {row['id']}: {e}")
 
 # ---------- ROUTES ----------
 @app.route('/')
@@ -319,46 +302,6 @@ def dashboard(business_id):
         return "Business not found", 404
     return render_template('dashboard.html', business=business)
 
-# ----- Bot Status -----
-@app.route('/bot-status/<int:business_id>')
-def bot_status(business_id):
-    business = get_business(business_id)
-    if not business:
-        return jsonify({"error": "Business not found"}), 404
-
-    token = business['bot_token']
-    is_active = business['is_active']
-    is_running = token in running_bots
-
-    return jsonify({
-        "business_name": business['business_name'],
-        "is_active": bool(is_active),
-        "is_running": is_running,
-        "token_preview": token[:10] + "..."
-    })
-
-# ----- Manual Bot Start -----
-@app.route('/start-bot/<int:business_id>')
-def start_bot_manually(business_id):
-    business = get_business(business_id)
-    if not business:
-        return "Business not found", 404
-
-    token = business['bot_token']
-    is_active = business['is_active']
-    if not is_active:
-        return "Bot is inactive – please activate it in your dashboard", 400
-
-    if token in running_bots:
-        return f"Bot for business {business_id} is already running."
-
-    try:
-        start_bot_thread(token, business_id)
-        return f"✅ Bot for business {business_id} started manually. Check logs for confirmation."
-    except Exception as e:
-        return f"❌ Failed to start bot: {e}", 500
-
-# ----- Registration API -----
 @app.route('/api/register', methods=['POST'])
 def api_register():
     try:
@@ -367,28 +310,21 @@ def api_register():
         token = data.get('bot_token')
         context = data.get('business_context')
         password = data.get('password')
-
+        
         if not all([name, token, context, password]):
             return jsonify({"error": "All fields are required"}), 400
-
         if get_business_by_token(token):
             return jsonify({"error": "Token already registered"}), 409
-
+        
         business_id = register_business(name, token, context, password)
         start_bot_thread(token, business_id)
-
         session['business_id'] = business_id
         session['business_name'] = name
-
         return jsonify({"status": "success", "business_id": business_id, "redirect": f"/dashboard/{business_id}"})
-
     except Exception as e:
         print(f"Registration error: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# ----- Other APIs -----
 @app.route('/api/business/<int:business_id>')
 def api_get_business(business_id):
     if 'business_id' not in session or session['business_id'] != business_id:
@@ -425,8 +361,29 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
-# ---------- MAIN (only used when running locally) ----------
+# ---------- DEBUG: Database initializer (access via browser) ----------
+@app.route('/init-db')
+def init_db_route():
+    try:
+        # Force table creation by calling get_db()
+        with get_db() as conn:
+            pass
+        return "Database initialized successfully! ✅"
+    except Exception as e:
+        return f"Error: {e} ❌"
+
+# ---------- STARTUP ----------
 if __name__ == '__main__':
-    # This will not run on Render because gunicorn imports the app
+    # Ensure database is created on startup
+    with get_db() as conn:
+        pass  # tables are created automatically
+    
+    # Restart any active bots from the database
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
+        for row in rows:
+            start_bot_thread(row['bot_token'], row['id'])
+    
+    print("🌐 Web server running...")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
