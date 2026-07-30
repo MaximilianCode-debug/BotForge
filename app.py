@@ -27,7 +27,6 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # Create tables on every connection – handles Render's ephemeral storage
     with conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS businesses (
@@ -270,6 +269,21 @@ def start_bot_thread(token, business_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
+# ---------- STARTUP (RUNS ON IMPORT) ----------
+# Initialize database
+with app.app_context():
+    get_db()  # This creates tables if they don't exist
+    print("✅ Database initialized")
+
+# Start active bots
+with get_db() as conn:
+    rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
+    for row in rows:
+        try:
+            start_bot_thread(row['bot_token'], row['id'])
+        except Exception as e:
+            print(f"⚠️ Failed to start bot {row['id']}: {e}")
+
 # ---------- ROUTES ----------
 @app.route('/')
 def index():
@@ -305,7 +319,7 @@ def dashboard(business_id):
         return "Business not found", 404
     return render_template('dashboard.html', business=business)
 
-# ----- Bot Status Endpoint (NEW) -----
+# ----- Bot Status -----
 @app.route('/bot-status/<int:business_id>')
 def bot_status(business_id):
     business = get_business(business_id)
@@ -314,8 +328,6 @@ def bot_status(business_id):
 
     token = business['bot_token']
     is_active = business['is_active']
-
-    # Check if the bot is in the running_bots dict
     is_running = token in running_bots
 
     return jsonify({
@@ -325,13 +337,32 @@ def bot_status(business_id):
         "token_preview": token[:10] + "..."
     })
 
+# ----- Manual Bot Start -----
+@app.route('/start-bot/<int:business_id>')
+def start_bot_manually(business_id):
+    business = get_business(business_id)
+    if not business:
+        return "Business not found", 404
+
+    token = business['bot_token']
+    is_active = business['is_active']
+    if not is_active:
+        return "Bot is inactive – please activate it in your dashboard", 400
+
+    if token in running_bots:
+        return f"Bot for business {business_id} is already running."
+
+    try:
+        start_bot_thread(token, business_id)
+        return f"✅ Bot for business {business_id} started manually. Check logs for confirmation."
+    except Exception as e:
+        return f"❌ Failed to start bot: {e}", 500
+
 # ----- Registration API -----
 @app.route('/api/register', methods=['POST'])
 def api_register():
     try:
         data = request.get_json()
-        print(f"Registration data received: {data}")
-
         name = data.get('business_name')
         token = data.get('bot_token')
         context = data.get('business_context')
@@ -394,23 +425,8 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
-# ---------- STARTUP ----------
+# ---------- MAIN (only used when running locally) ----------
 if __name__ == '__main__':
-    # Ensure database exists on startup
-    with app.app_context():
-        try:
-            with get_db() as conn:
-                pass  # Tables are created inside get_db()
-            print("✅ Database initialized (or already exists)")
-        except Exception as e:
-            print(f"⚠️ Database init error: {e}")
-
-    # Start existing bots
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
-        for row in rows:
-            start_bot_thread(row['bot_token'], row['id'])
-
-    print("🌐 Web server running...")
+    # This will not run on Render because gunicorn imports the app
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
