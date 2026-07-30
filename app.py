@@ -26,7 +26,7 @@ def get_db():
     """Get database connection and ensure tables exist (for Render's ephemeral storage)."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    
+
     # Create tables if they don't exist – runs on every request
     with conn:
         conn.execute('''
@@ -197,7 +197,11 @@ def create_bot_app(token, business_id):
     if not business or not business['is_active']:
         return None
 
-    app = Application.builder().token(token).build()
+    try:
+        app = Application.builder().token(token).build()
+    except Exception as e:
+        print(f"❌ Failed to build bot application: {e}")
+        return None
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
@@ -250,15 +254,25 @@ def create_bot_app(token, business_id):
 
 def start_bot_thread(token, business_id):
     def run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        app = create_bot_app(token, business_id)
-        if app:
-            running_bots[token] = app
-            print(f"🤖 Bot for business {business_id} started polling...")
-            app.run_polling(allowed_updates=Update.ALL_TYPES)
-        else:
-            print(f"❌ Failed to start bot for business {business_id}")
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            app = create_bot_app(token, business_id)
+            if app:
+                running_bots[token] = app
+                print(f"🤖 Bot for business {business_id} started polling...")
+                # Disable signal handlers – they only work in the main thread
+                app.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    stop_signals=None  # Critical for background threads
+                )
+            else:
+                print(f"❌ Failed to start bot for business {business_id}")
+        except Exception as e:
+            print(f"⚠️ Bot thread error: {e}")
+            import traceback
+            traceback.print_exc()
+
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return thread
@@ -310,12 +324,12 @@ def api_register():
         token = data.get('bot_token')
         context = data.get('business_context')
         password = data.get('password')
-        
+
         if not all([name, token, context, password]):
             return jsonify({"error": "All fields are required"}), 400
         if get_business_by_token(token):
             return jsonify({"error": "Token already registered"}), 409
-        
+
         business_id = register_business(name, token, context, password)
         start_bot_thread(token, business_id)
         session['business_id'] = business_id
@@ -361,11 +375,10 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
-# ---------- DEBUG: Database initializer (access via browser) ----------
+# ---------- DATABASE INITIALIZER (visit /init-db if needed) ----------
 @app.route('/init-db')
 def init_db_route():
     try:
-        # Force table creation by calling get_db()
         with get_db() as conn:
             pass
         return "Database initialized successfully! ✅"
@@ -374,16 +387,16 @@ def init_db_route():
 
 # ---------- STARTUP ----------
 if __name__ == '__main__':
-    # Ensure database is created on startup
+    # Ensure database exists
     with get_db() as conn:
         pass  # tables are created automatically
-    
-    # Restart any active bots from the database
+
+    # Restart any active bots
     with get_db() as conn:
         rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
         for row in rows:
             start_bot_thread(row['bot_token'], row['id'])
-    
+
     print("🌐 Web server running...")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
