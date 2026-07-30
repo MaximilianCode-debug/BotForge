@@ -368,6 +368,14 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
+# Database INIT 
+@app.route('/init-db')
+def init_db_route():
+    try:
+        init_db()
+        return "Database initialized successfully! ✅"
+    except Exception as e:
+        return f"Error: {e} ❌"
 # ---------- STARTUP ----------
 if __name__ == '__main__':
     init_db()
