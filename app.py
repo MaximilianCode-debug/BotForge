@@ -14,6 +14,7 @@ load_dotenv()
 
 # ---------- CONFIG ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Use the latest supported model
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
