@@ -56,11 +56,6 @@ def get_db():
 
     return conn
 
-def init_db():
-    """Legacy function – kept for compatibility."""
-    with get_db() as conn:
-        pass  # Tables are created inside get_db()
-
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -310,7 +305,27 @@ def dashboard(business_id):
         return "Business not found", 404
     return render_template('dashboard.html', business=business)
 
-# ----- Registration API (with better error handling) -----
+# ----- Bot Status Endpoint (NEW) -----
+@app.route('/bot-status/<int:business_id>')
+def bot_status(business_id):
+    business = get_business(business_id)
+    if not business:
+        return jsonify({"error": "Business not found"}), 404
+
+    token = business['bot_token']
+    is_active = business['is_active']
+
+    # Check if the bot is in the running_bots dict
+    is_running = token in running_bots
+
+    return jsonify({
+        "business_name": business['business_name'],
+        "is_active": bool(is_active),
+        "is_running": is_running,
+        "token_preview": token[:10] + "..."
+    })
+
+# ----- Registration API -----
 @app.route('/api/register', methods=['POST'])
 def api_register():
     try:
