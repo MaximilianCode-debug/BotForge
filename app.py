@@ -23,13 +23,12 @@ DB_PATH = "database.db"
 
 # ---------- DATABASE ----------
 def get_db():
+    """Get database connection and create tables if they don't exist."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
 
-def init_db():
-    with get_db() as conn:
-        # Businesses table with password field
+    # Create tables on every connection – handles Render's ephemeral storage
+    with conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS businesses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,12 +41,6 @@ def init_db():
                 is_active BOOLEAN DEFAULT 1
             )
         ''')
-        # Add password column if it doesn't exist (for existing databases)
-        try:
-            conn.execute("ALTER TABLE businesses ADD COLUMN password TEXT")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
         conn.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,9 +53,14 @@ def init_db():
                 FOREIGN KEY (business_id) REFERENCES businesses(id)
             )
         ''')
-        conn.commit()
 
-# ---------- DB HELPERS ----------
+    return conn
+
+def init_db():
+    """Legacy function – kept for compatibility."""
+    with get_db() as conn:
+        pass  # Tables are created inside get_db()
+
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -154,10 +152,6 @@ def get_analytics(business_id):
 
 # ---------- CONVERSATION HISTORY ----------
 def get_conversation_history(business_id, chat_id, limit=5):
-    """
-    Retrieve the last `limit` exchanges (user + assistant) for a given chat_id.
-    Returns a list of messages with roles: 'user' or 'assistant'.
-    """
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -244,7 +238,7 @@ def create_bot_app(token, business_id):
             return
 
         history = get_conversation_history(business_id, chat_id, limit=5)
-        
+
         messages = []
         for entry in history:
             messages.append({"role": entry['role'], "content": entry['content']})
@@ -281,6 +275,7 @@ def start_bot_thread(token, business_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
+# ---------- ROUTES ----------
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -315,23 +310,39 @@ def dashboard(business_id):
         return "Business not found", 404
     return render_template('dashboard.html', business=business)
 
+# ----- Registration API (with better error handling) -----
 @app.route('/api/register', methods=['POST'])
 def api_register():
-    data = request.get_json()
-    name = data.get('business_name')
-    token = data.get('bot_token')
-    context = data.get('business_context')
-    password = data.get('password')
-    if not all([name, token, context, password]):
-        return jsonify({"error": "All fields are required"}), 400
-    if get_business_by_token(token):
-        return jsonify({"error": "Token already registered"}), 409
-    business_id = register_business(name, token, context, password)
-    start_bot_thread(token, business_id)
-    session['business_id'] = business_id
-    session['business_name'] = name
-    return jsonify({"status": "success", "business_id": business_id, "redirect": f"/dashboard/{business_id}"})
+    try:
+        data = request.get_json()
+        print(f"Registration data received: {data}")
 
+        name = data.get('business_name')
+        token = data.get('bot_token')
+        context = data.get('business_context')
+        password = data.get('password')
+
+        if not all([name, token, context, password]):
+            return jsonify({"error": "All fields are required"}), 400
+
+        if get_business_by_token(token):
+            return jsonify({"error": "Token already registered"}), 409
+
+        business_id = register_business(name, token, context, password)
+        start_bot_thread(token, business_id)
+
+        session['business_id'] = business_id
+        session['business_name'] = name
+
+        return jsonify({"status": "success", "business_id": business_id, "redirect": f"/dashboard/{business_id}"})
+
+    except Exception as e:
+        print(f"Registration error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+# ----- Other APIs -----
 @app.route('/api/business/<int:business_id>')
 def api_get_business(business_id):
     if 'business_id' not in session or session['business_id'] != business_id:
@@ -368,21 +379,23 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
-# Database INIT 
-@app.route('/init-db')
-def init_db_route():
-    try:
-        init_db()
-        return "Database initialized successfully! ✅"
-    except Exception as e:
-        return f"Error: {e} ❌"
 # ---------- STARTUP ----------
 if __name__ == '__main__':
-    init_db()
+    # Ensure database exists on startup
+    with app.app_context():
+        try:
+            with get_db() as conn:
+                pass  # Tables are created inside get_db()
+            print("✅ Database initialized (or already exists)")
+        except Exception as e:
+            print(f"⚠️ Database init error: {e}")
+
+    # Start existing bots
     with get_db() as conn:
         rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
         for row in rows:
             start_bot_thread(row['bot_token'], row['id'])
+
     print("🌐 Web server running...")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
