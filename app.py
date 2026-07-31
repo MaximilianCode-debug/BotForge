@@ -14,7 +14,6 @@ load_dotenv()
 
 # ---------- CONFIG ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Use the latest supported model (update in Render env if needed)
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
@@ -216,7 +215,14 @@ def create_bot_app(token, business_id):
         print(f"❌ Failed to build bot application: {e}")
         return None
 
+    # ----- Handlers -----
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # 🔥 ALWAYS fetch fresh business data from database
+        business = get_business(business_id)
+        if not business:
+            await update.message.reply_text("⚠️ Business not found.")
+            return
+
         await update.message.reply_text(
             f"👋 *Hello! I'm the AI Assistant for {business['business_name']}.*\n\n"
             "I can help you with:\n"
@@ -241,11 +247,22 @@ def create_bot_app(token, business_id):
         chat_id = str(update.effective_chat.id)
         user_msg = update.message.text
 
+        # Log incoming
         log_message(business_id, chat_id, user_msg=user_msg, direction='incoming')
+
+        # 🔥 CRITICAL: Reload business data from database on every message
+        business = get_business(business_id)
+        if not business:
+            await update.message.reply_text("⚠️ Business not found. Please contact owner.")
+            return
+
+        if not business['is_active']:
+            await update.message.reply_text("⚠️ This bot is currently inactive. Please contact the owner.")
+            return
 
         context_text = business['business_context']
         if not context_text:
-            await update.message.reply_text("⚠️ Business info missing. Contact owner.")
+            await update.message.reply_text("⚠️ Business info missing. Please update your dashboard settings.")
             return
 
         # Get conversation history (last 5 exchanges)
@@ -258,9 +275,11 @@ def create_bot_app(token, business_id):
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
         reply = await ask_groq(messages, context_text)
 
+        # Log outgoing
         log_message(business_id, chat_id, bot_resp=reply, direction='outgoing')
         await update.message.reply_text(reply)
 
+    # Register handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
