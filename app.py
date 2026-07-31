@@ -1,4 +1,4 @@
-import os
+ import os
 import sqlite3
 import threading
 import asyncio
@@ -14,7 +14,7 @@ load_dotenv()
 
 # ---------- CONFIG ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Use the latest supported model
+# Use the latest supported model (update in Render env if needed)
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
@@ -172,17 +172,29 @@ def get_conversation_history(business_id, chat_id, limit=5):
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
 async def ask_groq(messages: list, business_context: str) -> str:
+    """
+    Sends conversation to Groq with a strict system prompt that forces the bot
+    to ONLY answer based on the provided business context.
+    """
     system_prompt = (
-        f"You are a professional business assistant for {business_context}. "
-        "Use the conversation history to provide coherent and context-aware answers. "
-        "Be polite, concise, and helpful."
+        f"You are a customer service representative for the business described below.\n\n"
+        f"BUSINESS INFORMATION:\n{business_context}\n\n"
+        f"RULES YOU MUST FOLLOW:\n"
+        f"1. ONLY answer questions based on the business information above.\n"
+        f"2. If someone asks a question NOT covered by the business info, say:\n"
+        f"   'I'm sorry, I don't have that information. Please contact us directly.'\n"
+        f"3. DO NOT make up answers – only use the business info provided.\n"
+        f"4. Be friendly, professional, and helpful.\n"
+        f"5. Use the conversation history to provide consistent answers.\n"
+        f"6. Always introduce yourself as 'Assistant from [Business Name]'.\n"
+        f"7. If the user asks about something unrelated to the business, politely redirect them."
     )
     full_messages = [{"role": "system", "content": system_prompt}] + messages
     try:
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL,
             messages=full_messages,
-            temperature=0.7,
+            temperature=0.3,          # Lower = more factual, less creative
             max_tokens=1024,
         )
         return response.choices[0].message.content.strip()
@@ -207,12 +219,12 @@ def create_bot_app(token, business_id):
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"👋 *Hello! I'm the AI Assistant for {business['business_name']}.*\n\n"
-            "I'm here to help you with:\n"
-            "• Questions about our products and services\n"
+            "I can help you with:\n"
+            f"• Questions about {business['business_name']}\n"
             "• Business hours and location\n"
-            "• Pricing and availability\n"
-            "• Any other business-related inquiries\n\n"
-            "Just ask me anything – I'll do my best to help!"
+            "• Products and services\n"
+            "• Pricing and availability\n\n"
+            "Please ask me anything about our business – I'm here to help!"
         )
 
     async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -236,6 +248,7 @@ def create_bot_app(token, business_id):
             await update.message.reply_text("⚠️ Business info missing. Contact owner.")
             return
 
+        # Get conversation history (last 5 exchanges)
         history = get_conversation_history(business_id, chat_id, limit=5)
         messages = []
         for entry in history:
@@ -265,7 +278,7 @@ def start_bot_thread(token, business_id):
                 # Disable signal handlers – they only work in the main thread
                 app.run_polling(
                     allowed_updates=Update.ALL_TYPES,
-                    stop_signals=None  # Critical for background threads
+                    stop_signals=None
                 )
             else:
                 print(f"❌ Failed to start bot for business {business_id}")
@@ -390,9 +403,9 @@ def init_db_route():
 if __name__ == '__main__':
     # Ensure database exists
     with get_db() as conn:
-        pass  # tables are created automatically
+        pass
 
-    # Restart any active bots
+    # Restart any active bots from the database
     with get_db() as conn:
         rows = conn.execute("SELECT id, bot_token FROM businesses WHERE is_active = 1").fetchall()
         for row in rows:
