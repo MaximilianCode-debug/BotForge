@@ -1,46 +1,337 @@
- <!-- Settings Tab -->
-<div class="tab-pane fade show active" id="settings" role="tabpanel">
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <h5 class="card-title"><i class="fas fa-cog me-2"></i>Settings</h5>
-            <p class="text-muted small">Update your business information below. All changes take effect immediately.</p>
-            <form id="settingsForm">
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Business Name</label>
-                    <input type="text" id="editName" class="form-control" value="{{ business.business_name }}">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Business Description</label>
-                    <textarea id="editContext" rows="3" class="form-control">{{ business.business_context }}</textarea>
-                    <div class="form-text">Describe what you do, products, services, etc.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold"><i class="fas fa-phone text-info me-1"></i> Contact Information</label>
-                    <input type="text" id="editContact" class="form-control" value="{{ business.contact or '' }}">
-                    <div class="form-text">Phone numbers, email addresses, or social media links.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold"><i class="fas fa-clock text-warning me-1"></i> Opening Hours</label>
-                    <input type="text" id="editHours" class="form-control" value="{{ business.hours or '' }}">
-                    <div class="form-text">When are you open? Include timezone if relevant.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold"><i class="fas fa-map-marker-alt text-danger me-1"></i> Location / Address</label>
-                    <input type="text" id="editLocation" class="form-control" value="{{ business.location or '' }}">
-                    <div class="form-text">Physical address or area where you're located.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold"><i class="fas fa-plus-circle text-secondary me-1"></i> Additional Information</label>
-                    <textarea id="editAdditional" rows="2" class="form-control">{{ business.additional_info or '' }}</textarea>
-                    <div class="form-text">Optional – add anything else your customers should know.</div>
-                </div>
-                <div class="mb-3 form-check">
-                    <input type="checkbox" id="editActive" class="form-check-input" {% if business.is_active %}checked{% endif %}>
-                    <label class="form-check-label" for="editActive">Bot Active</label>
-                </div>
-                <button type="submit" class="btn btn-primary">Save Changes</button>
-            </form>
-            <div id="settingsStatus" class="mt-3 text-success d-none"></div>
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard – BotForge</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { background: #f0f2f5; font-size: 1rem; }
+        .stat-card { 
+            background: white; 
+            border-radius: 16px; 
+            padding: 2rem 1.5rem; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+            text-align: center; 
+            height: 100%;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-4px); }
+        .stat-number { font-size: 2.8rem; font-weight: 700; }
+        .stat-label { font-size: 1rem; color: #6c757d; margin-top: 0.25rem; }
+        .message-item { 
+            border-bottom: 1px solid #e9ecef; 
+            padding: 1rem 0; 
+        }
+        .message-item:last-child { border-bottom: none; }
+        .message-meta { font-size: 0.85rem; color: #6c757d; }
+        .message-content { font-size: 1rem; margin-top: 0.25rem; }
+        .nav-tabs .nav-link { 
+            font-size: 1.05rem; 
+            padding: 0.75rem 1.5rem; 
+        }
+        .card { 
+            border-radius: 16px; 
+            border: none; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+        }
+        .card-body { padding: 2rem; }
+        .form-control, .form-select { 
+            font-size: 1rem; 
+            padding: 0.75rem 1rem; 
+            border-radius: 10px; 
+        }
+        .form-label { font-weight: 600; font-size: 1rem; }
+        .btn { 
+            padding: 0.65rem 1.5rem; 
+            border-radius: 10px; 
+            font-weight: 600; 
+        }
+        .section-title { 
+            font-size: 1.3rem; 
+            font-weight: 700; 
+            margin-bottom: 1.5rem; 
+        }
+        .navbar { padding: 0.75rem 0; }
+        .navbar-brand { font-size: 1.5rem; }
+        .nav-link { font-weight: 500; }
+        .tab-pane { padding-top: 1.5rem; }
+        .badge-status { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
+        .text-muted-small { font-size: 0.9rem; color: #6c757d; }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="/">
+            <i class="fas fa-robot text-primary me-2"></i>BotForge
+        </a>
+        <span class="navbar-text text-muted small">Dashboard</span>
+        <div>
+            <a href="/logout" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-sign-out-alt me-1"></i>Logout
+            </a>
         </div>
     </div>
-</div>
+</nav>
+
+<!-- Main Content -->
+<div class="container py-4">
+
+    <!-- Welcome Header -->
+    <div class="mb-4">
+        <h1 class="display-5 fw-bold">Welcome, <span id="bizName" class="text-primary">{{ business.business_name }}</span></h1>
+        <p class="text-muted lead">Manage your bot, view messages, and track performance – all in one place.</p>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs" id="myTab" role="tablist" style="border-bottom: 2px solid #dee2e6;">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button" role="tab">
+                <i class="fas fa-cog me-2"></i>Settings
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="inbox-tab" data-bs-toggle="tab" data-bs-target="#inbox" type="button" role="tab">
+                <i class="fas fa-inbox me-2"></i>Inbox
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics" type="button" role="tab">
+                <i class="fas fa-chart-line me-2"></i>Analytics
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content pt-3">
+
+        <!-- ==================== SETTINGS TAB ==================== -->
+        <div class="tab-pane fade show active" id="settings" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <h4 class="section-title"><i class="fas fa-edit me-2"></i>Business Information</h4>
+                    <p class="text-muted-small">Update your details below. Changes take effect immediately for all new conversations.</p>
+
+                    <form id="settingsForm">
+                        <!-- Business Name -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-store text-success me-1"></i> Business Name</label>
+                            <input type="text" id="editName" class="form-control form-control-lg" value="{{ business.business_name }}">
+                        </div>
+
+                        <!-- Description -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-file-alt text-primary me-1"></i> Business Description</label>
+                            <textarea id="editContext" rows="3" class="form-control form-control-lg">{{ business.business_context }}</textarea>
+                            <div class="form-text">What do you offer? What makes you unique?</div>
+                        </div>
+
+                        <!-- Contact -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-phone text-info me-1"></i> Contact Information</label>
+                            <input type="text" id="editContact" class="form-control form-control-lg" value="{{ business.contact or '' }}" placeholder="e.g., +234 800 1234 567, info@business.com">
+                            <div class="form-text">Phone, email, or social media links.</div>
+                        </div>
+
+                        <!-- Hours -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-clock text-warning me-1"></i> Opening Hours</label>
+                            <input type="text" id="editHours" class="form-control form-control-lg" value="{{ business.hours or '' }}" placeholder="e.g., Mon–Sat 8am–10pm, Sun closed">
+                            <div class="form-text">Include timezone if relevant.</div>
+                        </div>
+
+                        <!-- Location -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-map-marker-alt text-danger me-1"></i> Location / Address</label>
+                            <input type="text" id="editLocation" class="form-control form-control-lg" value="{{ business.location or '' }}" placeholder="e.g., 123 Main Rd, Lagos, Nigeria">
+                        </div>
+
+                        <!-- Additional Info -->
+                        <div class="mb-4">
+                            <label class="form-label"><i class="fas fa-plus-circle text-secondary me-1"></i> Additional Information</label>
+                            <textarea id="editAdditional" rows="2" class="form-control form-control-lg">{{ business.additional_info or '' }}</textarea>
+                            <div class="form-text">Delivery options, payment methods, special offers, etc.</div>
+                        </div>
+
+                        <!-- Active Toggle -->
+                        <div class="mb-4 form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="editActive" {% if business.is_active %}checked{% endif %} style="width: 3rem; height: 1.5rem;">
+                            <label class="form-check-label fw-semibold" for="editActive">Bot Active</label>
+                            <span class="text-muted ms-2 small">(Disable to pause your bot)</span>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-lg px-5">
+                            <i class="fas fa-save me-2"></i>Save Changes
+                        </button>
+                    </form>
+                    <div id="settingsStatus" class="mt-4 text-success fw-semibold d-none"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== INBOX TAB ==================== -->
+        <div class="tab-pane fade" id="inbox" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="section-title mb-0"><i class="fas fa-inbox me-2"></i>Inbox</h4>
+                        <button id="refreshInbox" class="btn btn-outline-primary">
+                            <i class="fas fa-sync-alt me-1"></i>Refresh
+                        </button>
+                    </div>
+                    <div id="messageList" style="max-height: 500px; overflow-y: auto;">
+                        <p class="text-muted text-center py-4">Loading messages...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ANALYTICS TAB ==================== -->
+        <div class="tab-pane fade" id="analytics" role="tabpanel">
+            <div class="row g-4 mb-4">
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number text-primary" id="statTotal">-</div>
+                        <div class="stat-label">Total Messages</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number text-success" id="statUsers">-</div>
+                        <div class="stat-label">Unique Users</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number text-purple" id="statRecent" style="color:#6f42c1;">-</div>
+                        <div class="stat-label">Messages (Last 24h)</div>
+                    </div>
+                </div>
+            </div>
+            <button id="refreshAnalytics" class="btn btn-outline-primary btn-lg">
+                <i class="fas fa-sync-alt me-2"></i>Refresh Analytics
+            </button>
+        </div>
+
+    </div><!-- /tab-content -->
+</div><!-- /container -->
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    var businessId = {{ business.id }};
+
+    // ------------------------------------------------------------------
+    // SETTINGS FORM
+    // ------------------------------------------------------------------
+    var settingsForm = document.getElementById('settingsForm');
+    var settingsStatus = document.getElementById('settingsStatus');
+
+    settingsForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        var name = document.getElementById('editName').value.trim();
+        var context = document.getElementById('editContext').value.trim();
+        var contact = document.getElementById('editContact').value.trim();
+        var hours = document.getElementById('editHours').value.trim();
+        var location = document.getElementById('editLocation').value.trim();
+        var additional = document.getElementById('editAdditional').value.trim();
+        var active = document.getElementById('editActive').checked;
+
+        fetch('/api/business/' + businessId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                business_name: name,
+                business_context: context,
+                contact: contact,
+                hours: hours,
+                location: location,
+                additional_info: additional,
+                is_active: active
+            })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (data.status === 'updated') {
+                settingsStatus.textContent = '✅ Settings updated successfully!';
+                settingsStatus.className = 'mt-3 text-success fw-semibold';
+                document.getElementById('bizName').textContent = name;
+            } else {
+                settingsStatus.textContent = '❌ Failed to update.';
+                settingsStatus.className = 'mt-3 text-danger fw-semibold';
+            }
+            settingsStatus.classList.remove('d-none');
+        })
+        .catch(function() {
+            settingsStatus.textContent = '❌ Network error. Please try again.';
+            settingsStatus.className = 'mt-3 text-danger fw-semibold';
+            settingsStatus.classList.remove('d-none');
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // INBOX
+    // ------------------------------------------------------------------
+    function loadMessages() {
+        var container = document.getElementById('messageList');
+        fetch('/api/messages/' + businessId + '?limit=50')
+        .then(function(res) { return res.json(); })
+        .then(function(msgs) {
+            if (msgs.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center py-4">No messages yet. Share your bot with customers!</p>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < msgs.length; i++) {
+                var m = msgs[i];
+                var direction = m.direction === 'incoming' ? '👤 User' : '🤖 Bot';
+                var time = new Date(m.timestamp).toLocaleString();
+                var userMsg = m.user_message ? '<strong>Q:</strong> ' + m.user_message : '';
+                var botMsg = m.bot_response ? '<strong>A:</strong> ' + m.bot_response : '';
+                html += '<div class="message-item">';
+                html += '  <div class="message-meta d-flex justify-content-between">';
+                html += '    <span>' + direction + '</span>';
+                html += '    <span>' + time + '</span>';
+                html += '  </div>';
+                html += '  <div class="message-content">';
+                if (userMsg) html += '<div>' + userMsg + '</div>';
+                if (botMsg) html += '<div>' + botMsg + '</div>';
+                html += '  </div>';
+                html += '</div>';
+            }
+            container.innerHTML = html;
+        })
+        .catch(function() {
+            container.innerHTML = '<p class="text-danger text-center py-4">Failed to load messages. Please refresh.</p>';
+        });
+    }
+
+    document.getElementById('refreshInbox').addEventListener('click', loadMessages);
+    loadMessages();
+    setInterval(loadMessages, 10000);
+
+    // ------------------------------------------------------------------
+    // ANALYTICS
+    // ------------------------------------------------------------------
+    function loadAnalytics() {
+        fetch('/api/analytics/' + businessId)
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            document.getElementById('statTotal').textContent = data.total_messages || 0;
+            document.getElementById('statUsers').textContent = data.unique_users || 0;
+            document.getElementById('statRecent').textContent = data.messages_last_24h || 0;
+        })
+        .catch(function() {});
+    }
+
+    document.getElementById('refreshAnalytics').addEventListener('click', loadAnalytics);
+    loadAnalytics();
+</script>
+
+</body>
+</html>
