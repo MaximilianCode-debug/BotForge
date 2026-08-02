@@ -1,4 +1,4 @@
-import os
+ import os
 import sqlite3
 import threading
 import asyncio
@@ -35,12 +35,38 @@ def get_db():
                 business_name TEXT NOT NULL,
                 bot_token TEXT UNIQUE NOT NULL,
                 business_context TEXT NOT NULL,
+                contact TEXT,
+                hours TEXT,
+                location TEXT,
+                additional_info TEXT,
                 password TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT 1
             )
         ''')
+        
+        # Add new columns if they don't exist (for existing databases)
+        try:
+            conn.execute("ALTER TABLE businesses ADD COLUMN contact TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE businesses ADD COLUMN hours TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            conn.execute("ALTER TABLE businesses ADD COLUMN location TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            conn.execute("ALTER TABLE businesses ADD COLUMN additional_info TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
         conn.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,12 +85,14 @@ def get_db():
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-def register_business(name, token, context, password):
+def register_business(name, token, context, contact, hours, location, additional_info, password):
     with get_db() as conn:
         hashed = hash_password(password)
         cur = conn.execute(
-            "INSERT INTO businesses (business_name, bot_token, business_context, password) VALUES (?, ?, ?, ?)",
-            (name, token, context, hashed)
+            """INSERT INTO businesses 
+               (business_name, bot_token, business_context, contact, hours, location, additional_info, password) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, token, context, contact, hours, location, additional_info, hashed)
         )
         business_id = cur.lastrowid
         conn.commit()
@@ -89,7 +117,7 @@ def get_business_by_credentials(token, password):
         ).fetchone()
         return dict(row) if row else None
 
-def update_business(business_id, name=None, context=None, active=None, password=None):
+def update_business(business_id, name=None, context=None, contact=None, hours=None, location=None, additional_info=None, active=None, password=None):
     updates = []
     params = []
     if name is not None:
@@ -98,6 +126,18 @@ def update_business(business_id, name=None, context=None, active=None, password=
     if context is not None:
         updates.append("business_context = ?")
         params.append(context)
+    if contact is not None:
+        updates.append("contact = ?")
+        params.append(contact)
+    if hours is not None:
+        updates.append("hours = ?")
+        params.append(hours)
+    if location is not None:
+        updates.append("location = ?")
+        params.append(location)
+    if additional_info is not None:
+        updates.append("additional_info = ?")
+        params.append(additional_info)
     if active is not None:
         updates.append("is_active = ?")
         params.append(1 if active else 0)
@@ -170,14 +210,34 @@ def get_conversation_history(business_id, chat_id, limit=5):
 # ---------- GROQ ----------
 groq_client = groq.Groq(api_key=GROQ_API_KEY)
 
-async def ask_groq(messages: list, business_context: str) -> str:
+async def ask_groq(messages: list, business: dict) -> str:
     """
     Sends conversation to Groq with a strict system prompt that forces the bot
-    to ONLY answer based on the provided business context.
+    to ONLY answer based on the provided business information.
     """
+    # Build comprehensive business context from all fields
+    business_info = f"""
+BUSINESS NAME: {business.get('business_name', 'Unknown')}
+
+DESCRIPTION:
+{business.get('business_context', 'Not provided')}
+
+CONTACT INFORMATION:
+{business.get('contact', 'Not provided')}
+
+OPENING HOURS:
+{business.get('hours', 'Not provided')}
+
+LOCATION / ADDRESS:
+{business.get('location', 'Not provided')}
+
+ADDITIONAL INFORMATION:
+{business.get('additional_info', 'Not provided')}
+"""
+
     system_prompt = (
         f"You are a customer service representative for the business described below.\n\n"
-        f"BUSINESS INFORMATION:\n{business_context}\n\n"
+        f"{business_info}\n\n"
         f"RULES YOU MUST FOLLOW:\n"
         f"1. ONLY answer questions based on the business information above.\n"
         f"2. If someone asks a question NOT covered by the business info, say:\n"
@@ -185,7 +245,7 @@ async def ask_groq(messages: list, business_context: str) -> str:
         f"3. DO NOT make up answers – only use the business info provided.\n"
         f"4. Be friendly, professional, and helpful.\n"
         f"5. Use the conversation history to provide consistent answers.\n"
-        f"6. Always introduce yourself as 'Assistant from [Business Name]'.\n"
+        f"6. Always introduce yourself as 'Assistant from {business.get('business_name', 'the business')}'.\n"
         f"7. If the user asks about something unrelated to the business, politely redirect them."
     )
     full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -193,7 +253,7 @@ async def ask_groq(messages: list, business_context: str) -> str:
         response = groq_client.chat.completions.create(
             model=GROQ_MODEL,
             messages=full_messages,
-            temperature=0.3,          # Lower = more factual, less creative
+            temperature=0.3,
             max_tokens=1024,
         )
         return response.choices[0].message.content.strip()
@@ -215,9 +275,7 @@ def create_bot_app(token, business_id):
         print(f"❌ Failed to build bot application: {e}")
         return None
 
-    # ----- Handlers -----
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # 🔥 ALWAYS fetch fresh business data from database
         business = get_business(business_id)
         if not business:
             await update.message.reply_text("⚠️ Business not found.")
@@ -247,10 +305,9 @@ def create_bot_app(token, business_id):
         chat_id = str(update.effective_chat.id)
         user_msg = update.message.text
 
-        # Log incoming
         log_message(business_id, chat_id, user_msg=user_msg, direction='incoming')
 
-        # 🔥 CRITICAL: Reload business data from database on every message
+        # 🔥 Reload fresh business data on every message
         business = get_business(business_id)
         if not business:
             await update.message.reply_text("⚠️ Business not found. Please contact owner.")
@@ -260,12 +317,19 @@ def create_bot_app(token, business_id):
             await update.message.reply_text("⚠️ This bot is currently inactive. Please contact the owner.")
             return
 
-        context_text = business['business_context']
-        if not context_text:
-            await update.message.reply_text("⚠️ Business info missing. Please update your dashboard settings.")
+        # Check if any business info is provided
+        if not business.get('business_context') and not business.get('contact') and not business.get('hours') and not business.get('location'):
+            await update.message.reply_text(
+                "⚠️ Business information is incomplete. Please update your dashboard settings.\n\n"
+                "Make sure to fill in:\n"
+                "• Business description\n"
+                "• Contact information\n"
+                "• Opening hours\n"
+                "• Location"
+            )
             return
 
-        # Get conversation history (last 5 exchanges)
+        # Get conversation history
         history = get_conversation_history(business_id, chat_id, limit=5)
         messages = []
         for entry in history:
@@ -273,13 +337,11 @@ def create_bot_app(token, business_id):
         messages.append({"role": "user", "content": user_msg})
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        reply = await ask_groq(messages, context_text)
+        reply = await ask_groq(messages, business)
 
-        # Log outgoing
         log_message(business_id, chat_id, bot_resp=reply, direction='outgoing')
         await update.message.reply_text(reply)
 
-    # Register handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
@@ -294,7 +356,6 @@ def start_bot_thread(token, business_id):
             if app:
                 running_bots[token] = app
                 print(f"🤖 Bot for business {business_id} started polling...")
-                # Disable signal handlers – they only work in the main thread
                 app.run_polling(
                     allowed_updates=Update.ALL_TYPES,
                     stop_signals=None
@@ -356,14 +417,18 @@ def api_register():
         name = data.get('business_name')
         token = data.get('bot_token')
         context = data.get('business_context')
+        contact = data.get('contact')
+        hours = data.get('hours')
+        location = data.get('location')
+        additional_info = data.get('additional_info')
         password = data.get('password')
 
         if not all([name, token, context, password]):
-            return jsonify({"error": "All fields are required"}), 400
+            return jsonify({"error": "Business Name, Description, Bot Token, and Password are required"}), 400
         if get_business_by_token(token):
             return jsonify({"error": "Token already registered"}), 409
 
-        business_id = register_business(name, token, context, password)
+        business_id = register_business(name, token, context, contact, hours, location, additional_info, password)
         start_bot_thread(token, business_id)
         session['business_id'] = business_id
         session['business_name'] = name
@@ -388,9 +453,13 @@ def api_update_business(business_id):
     data = request.get_json()
     name = data.get('business_name')
     context = data.get('business_context')
+    contact = data.get('contact')
+    hours = data.get('hours')
+    location = data.get('location')
+    additional_info = data.get('additional_info')
     active = data.get('is_active')
     password = data.get('password')
-    update_business(business_id, name=name, context=context, active=active, password=password)
+    update_business(business_id, name=name, context=context, contact=contact, hours=hours, location=location, additional_info=additional_info, active=active, password=password)
     return jsonify({"status": "updated"})
 
 @app.route('/api/messages/<int:business_id>')
