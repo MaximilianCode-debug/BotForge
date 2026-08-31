@@ -1,5 +1,7 @@
- Flask==3.0.0
-python-telegram-bot==20.6
+Flask==3.0.0
+python-telegram-bot>=20.8
 groq==0.4.2
 python-dotenv==1.0.0
 gunicorn
+httpx==0.27.2
+psycopg2-binary

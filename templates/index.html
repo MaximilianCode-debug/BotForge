@@ -10,6 +10,7 @@
         body { background: #f8f9fa; }
         .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3rem 0; }
         .card-shadow { box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .required:after { content: " *"; color: red; }
     </style>
 </head>
 <body>
@@ -40,24 +41,62 @@
                     <div class="card-body p-4">
                         <div id="statusMessage" class="alert d-none"></div>
                         <form id="registerForm">
+                            <!-- Business Name -->
                             <div class="mb-3">
-                                <label class="form-label fw-semibold"><i class="fas fa-store text-success me-1"></i> Business Name</label>
+                                <label class="form-label fw-semibold required"><i class="fas fa-store text-success me-1"></i> Business Name</label>
                                 <input type="text" id="businessName" class="form-control" placeholder="e.g., Chai Cafe Delhi" required>
+                                <div class="form-text">What is the name of your business?</div>
                             </div>
+
+                            <!-- Business Description -->
                             <div class="mb-3">
-                                <label class="form-label fw-semibold"><i class="fas fa-file-alt text-primary me-1"></i> Business Description</label>
-                                <textarea id="businessContext" rows="4" class="form-control" placeholder="Describe your products, hours, location, etc." required></textarea>
+                                <label class="form-label fw-semibold required"><i class="fas fa-file-alt text-primary me-1"></i> Business Description</label>
+                                <textarea id="businessContext" rows="3" class="form-control" placeholder="Describe what you do, products, services, etc." required></textarea>
+                                <div class="form-text">What products or services do you offer? What makes you unique?</div>
                             </div>
+
+                            <!-- Contact Information -->
                             <div class="mb-3">
-                                <label class="form-label fw-semibold"><i class="fab fa-telegram text-info me-1"></i> Telegram Bot Token</label>
+                                <label class="form-label fw-semibold"><i class="fas fa-phone text-info me-1"></i> Contact Information</label>
+                                <input type="text" id="contact" class="form-control" placeholder="e.g., +234 800 1234 567, info@chaicafe.com">
+                                <div class="form-text">Phone numbers, email addresses, or social media links.</div>
+                            </div>
+
+                            <!-- Opening Hours -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-clock text-warning me-1"></i> Opening Hours</label>
+                                <input type="text" id="hours" class="form-control" placeholder="e.g., Mon–Sat: 8 AM – 10 PM, Sunday: Closed">
+                                <div class="form-text">When are you open? Include timezone if relevant.</div>
+                            </div>
+
+                            <!-- Location -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-map-marker-alt text-danger me-1"></i> Location / Address</label>
+                                <input type="text" id="location" class="form-control" placeholder="e.g., 123 Main Road, Lagos, Nigeria">
+                                <div class="form-text">Physical address or area where you're located.</div>
+                            </div>
+
+                            <!-- Additional Information -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold"><i class="fas fa-plus-circle text-secondary me-1"></i> Additional Information</label>
+                                <textarea id="additionalInfo" rows="2" class="form-control" placeholder="Any other info? Delivery options, payment methods, special offers..."></textarea>
+                                <div class="form-text">Optional – add anything else your customers should know.</div>
+                            </div>
+
+                            <!-- Bot Token -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold required"><i class="fab fa-telegram text-info me-1"></i> Telegram Bot Token</label>
                                 <input type="text" id="botToken" class="form-control" placeholder="e.g., 123456:ABC-DEF..." required>
                                 <div class="form-text">Get your token from <a href="https://t.me/botfather" target="_blank">@BotFather</a> on Telegram.</div>
                             </div>
+
+                            <!-- Password -->
                             <div class="mb-3">
-                                <label class="form-label fw-semibold"><i class="fas fa-lock text-danger me-1"></i> Set Password</label>
+                                <label class="form-label fw-semibold required"><i class="fas fa-lock text-danger me-1"></i> Set Password</label>
                                 <input type="password" id="password" class="form-control" placeholder="Create a password for your account" required>
-                                <div class="form-text">Use this password to login later.</div>
+                                <div class="form-text">Use this password to login later. Minimum 6 characters.</div>
                             </div>
+
                             <button type="submit" class="btn btn-primary btn-lg w-100"><i class="fas fa-play me-2"></i>Deploy My Business</button>
                         </form>
                         <div class="text-center mt-4">
@@ -67,8 +106,8 @@
                 </div>
                 <div class="row mt-5 text-center">
                     <div class="col-md-4"><i class="fas fa-phone-alt fa-2x text-primary mb-2"></i><h5>1. Create Bot</h5><p class="text-muted">Talk to @BotFather</p></div>
-                    <div class="col-md-4"><i class="fas fa-pen-fancy fa-2x text-primary mb-2"></i><h5>2. Register</h5><p class="text-muted">Enter your info</p></div>
-                    <div class="col-md-4"><i class="fas fa-chart-line fa-2x text-primary mb-2"></i><h5>3. Manage</h5><p class="text-muted">Dashboard with inbox & analytics</p></div>
+                    <div class="col-md-4"><i class="fas fa-pen-fancy fa-2x text-primary mb-2"></i><h5>2. Register</h5><p class="text-muted">Enter your business info</p></div>
+                    <div class="col-md-4"><i class="fas fa-chart-line fa-2x text-primary mb-2"></i><h5>3. Manage</h5><p class="text-muted">Dashboard with inbox &amp; analytics</p></div>
                 </div>
             </div>
         </div>
@@ -90,13 +129,18 @@
 
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
+
             const business_name = document.getElementById('businessName').value.trim();
             const business_context = document.getElementById('businessContext').value.trim();
+            const contact = document.getElementById('contact').value.trim();
+            const hours = document.getElementById('hours').value.trim();
+            const location = document.getElementById('location').value.trim();
+            const additional_info = document.getElementById('additionalInfo').value.trim();
             const bot_token = document.getElementById('botToken').value.trim();
             const password = document.getElementById('password').value.trim();
 
             if (!business_name || !business_context || !bot_token || !password) {
-                showStatus('Please fill in all fields.', 'error');
+                showStatus('Please fill in all required fields (marked with *).', 'error');
                 return;
             }
             if (password.length < 6) {
@@ -108,11 +152,20 @@
                 const response = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ business_name, business_context, bot_token, password })
+                    body: JSON.stringify({
+                        business_name,
+                        business_context,
+                        contact,
+                        hours,
+                        location,
+                        additional_info,
+                        bot_token,
+                        password
+                    })
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    showStatus('✅ Deployment successful! Redirecting...', 'success');
+                    showStatus('✅ Deployment successful! Redirecting to your dashboard...', 'success');
                     setTimeout(function() {
                         window.location.href = data.redirect;
                     }, 1500);
