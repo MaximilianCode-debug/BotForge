@@ -486,7 +486,113 @@ def init_db_route():
         return "Database initialized successfully! ✅"
     except Exception as e:
         return f"Error: {e} ❌"
+# ---------- ADMIN AUTH ----------
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "youremail@gmail.com")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
+# ---------- ADMIN LOGIN ----------
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        if email == ADMIN_EMAIL and password == ADMIN_PASSWORD:
+            session['admin_logged_in'] = True
+            session['admin_email'] = email
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return render_template('admin_login.html', error="Invalid email or password")
+    return render_template('admin_login.html')
+
+# ---------- ADMIN LOGOUT ----------
+@app.route('/admin/logout')
+def admin_logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+# ---------- ADMIN DASHBOARD ----------
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    with get_db() as conn:
+        # Total businesses
+        total_businesses = conn.execute("SELECT COUNT(*) FROM businesses").fetchone()[0]
+        
+        # Active businesses
+        active_businesses = conn.execute("SELECT COUNT(*) FROM businesses WHERE is_active = 1").fetchone()[0]
+        
+        # Total messages
+        total_messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        
+        # Total unique users
+        unique_users = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM messages").fetchone()[0]
+        
+        # All businesses with their message count
+        businesses = conn.execute("""
+            SELECT b.*, 
+                   (SELECT COUNT(*) FROM messages WHERE business_id = b.id) as message_count,
+                   (SELECT COUNT(DISTINCT chat_id) FROM messages WHERE business_id = b.id) as user_count
+            FROM businesses b
+            ORDER BY b.id DESC
+        """).fetchall()
+    
+    return render_template('admin_dashboard.html', 
+                          total_businesses=total_businesses,
+                          active_businesses=active_businesses,
+                          total_messages=total_messages,
+                          unique_users=unique_users,
+                          businesses=businesses)
+
+# ---------- ADMIN TOGGLE BOT STATUS ----------
+@app.route('/admin/toggle/<int:business_id>', methods=['POST'])
+def admin_toggle_bot(business_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    with get_db() as conn:
+        # Get current status
+        current = conn.execute("SELECT is_active FROM businesses WHERE id = ?", (business_id,)).fetchone()
+        if not current:
+            return jsonify({"error": "Business not found"}), 404
+        
+        new_status = 0 if current[0] else 1
+        conn.execute("UPDATE businesses SET is_active = ? WHERE id = ?", (new_status, business_id))
+        conn.commit()
+    
+    return redirect(url_for('admin_dashboard'))
+
+# ---------- ADMIN DELETE BUSINESS ----------
+@app.route('/admin/delete/<int:business_id>', methods=['POST'])
+def admin_delete_business(business_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    with get_db() as conn:
+        # Delete messages first (foreign key)
+        conn.execute("DELETE FROM messages WHERE business_id = ?", (business_id,))
+        conn.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
+        conn.commit()
+    
+    return redirect(url_for('admin_dashboard'))
+
+# ---------- ADMIN VIEW BUSINESS MESSAGES ----------
+@app.route('/admin/business/<int:business_id>')
+def admin_business_messages(business_id):
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    with get_db() as conn:
+        business = conn.execute("SELECT * FROM businesses WHERE id = ?", (business_id,)).fetchone()
+        messages = conn.execute("""
+            SELECT * FROM messages 
+            WHERE business_id = ? 
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        """, (business_id,)).fetchall()
+    
+    return render_template('admin_business.html', business=business, messages=messages)
 # ---------- STARTUP ----------
 if __name__ == '__main__':
     # Ensure database exists
