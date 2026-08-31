@@ -14,12 +14,17 @@ load_dotenv()
 
 # ---------- CONFIG ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
+# FIXED: Use the correct, currently supported model
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
     raise ValueError("Missing GROQ_API_KEY in .env")
 
 DB_PATH = "database.db"
+
+# ---------- ADMIN CREDENTIALS ----------
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "youremail@gmail.com")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 # ---------- DATABASE ----------
 def get_db():
@@ -154,10 +159,6 @@ def get_analytics(business_id):
 
 # ---------- CONVERSATION HISTORY ----------
 def get_conversation_history(business_id, chat_id, limit=5):
-    """
-    Retrieve the last `limit` exchanges (user + assistant) for a given chat_id.
-    Returns a list of messages with roles: 'user' or 'assistant'.
-    """
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -169,7 +170,6 @@ def get_conversation_history(business_id, chat_id, limit=5):
             """,
             (business_id, str(chat_id), limit * 2)
         ).fetchall()
-
     rows = list(reversed(rows))
     history = []
     for row in rows:
@@ -199,7 +199,13 @@ async def ask_groq(messages: list, business_context: str) -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        return "⚠️ AI service temporarily unavailable. Please try later."
+        # Better error messages for common issues
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            return "⏳ We're getting too many messages right now. Please wait a moment and try again."
+        elif "decommissioned" in str(e).lower() or "model" in str(e).lower():
+            return "⚠️ AI model configuration error. Please contact support."
+        else:
+            return "⚠️ AI service temporarily unavailable. Please try later."
 
 # ---------- TELEGRAM BOT FACTORY ----------
 running_bots = {}
@@ -209,7 +215,11 @@ def create_bot_app(token, business_id):
     if not business or not business['is_active']:
         return None
 
-    app = Application.builder().token(token).build()
+    try:
+        app = Application.builder().token(token).build()
+    except Exception as e:
+        print(f"❌ Failed to build bot: {e}")
+        return None
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
@@ -263,15 +273,23 @@ def create_bot_app(token, business_id):
 
 def start_bot_thread(token, business_id):
     def run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        app = create_bot_app(token, business_id)
-        if app:
-            running_bots[token] = app
-            print(f"🤖 Bot for business {business_id} started polling...")
-            app.run_polling(allowed_updates=Update.ALL_TYPES)
-        else:
-            print(f"❌ Failed to start bot for business {business_id}")
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            app = create_bot_app(token, business_id)
+            if app:
+                running_bots[token] = app
+                print(f"🤖 Bot for business {business_id} started polling...")
+                app.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    stop_signals=None
+                )
+            else:
+                print(f"❌ Failed to start bot for business {business_id}")
+        except Exception as e:
+            print(f"⚠️ Bot thread error: {e}")
+            import traceback
+            traceback.print_exc()
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
@@ -281,6 +299,7 @@ def start_bot_thread(token, business_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
+# ---------- PUBLIC ROUTES ----------
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -315,22 +334,27 @@ def dashboard(business_id):
         return "Business not found", 404
     return render_template('dashboard.html', business=business)
 
+# ---------- API ROUTES ----------
 @app.route('/api/register', methods=['POST'])
 def api_register():
-    data = request.get_json()
-    name = data.get('business_name')
-    token = data.get('bot_token')
-    context = data.get('business_context')
-    password = data.get('password')
-    if not all([name, token, context, password]):
-        return jsonify({"error": "All fields are required"}), 400
-    if get_business_by_token(token):
-        return jsonify({"error": "Token already registered"}), 409
-    business_id = register_business(name, token, context, password)
-    start_bot_thread(token, business_id)
-    session['business_id'] = business_id
-    session['business_name'] = name
-    return jsonify({"status": "success", "business_id": business_id, "redirect": f"/dashboard/{business_id}"})
+    try:
+        data = request.get_json()
+        name = data.get('business_name')
+        token = data.get('bot_token')
+        context = data.get('business_context')
+        password = data.get('password')
+        if not all([name, token, context, password]):
+            return jsonify({"error": "All fields are required"}), 400
+        if get_business_by_token(token):
+            return jsonify({"error": "Token already registered"}), 409
+        business_id = register_business(name, token, context, password)
+        start_bot_thread(token, business_id)
+        session['business_id'] = business_id
+        session['business_name'] = name
+        return jsonify({"status": "success", "business_id": business_id, "redirect": f"/dashboard/{business_id}"})
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/business/<int:business_id>')
 def api_get_business(business_id):
@@ -368,6 +392,94 @@ def api_get_analytics(business_id):
     stats = get_analytics(business_id)
     return jsonify(stats)
 
+# ---------- ADMIN ROUTES ----------
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        if email == ADMIN_EMAIL and password == ADMIN_PASSWORD:
+            session['admin_logged_in'] = True
+            session['admin_email'] = email
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return render_template('admin_login.html', error="Invalid email or password")
+    return render_template('admin_login.html')
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    with get_db() as conn:
+        total_businesses = conn.execute("SELECT COUNT(*) FROM businesses").fetchone()[0]
+        active_businesses = conn.execute("SELECT COUNT(*) FROM businesses WHERE is_active = 1").fetchone()[0]
+        total_messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        unique_users = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM messages").fetchone()[0]
+        businesses = conn.execute("""
+            SELECT b.*, 
+                   (SELECT COUNT(*) FROM messages WHERE business_id = b.id) as message_count,
+                   (SELECT COUNT(DISTINCT chat_id) FROM messages WHERE business_id = b.id) as user_count
+            FROM businesses b
+            ORDER BY b.id DESC
+        """).fetchall()
+    
+    return render_template('admin_dashboard.html', 
+                          total_businesses=total_businesses,
+                          active_businesses=active_businesses,
+                          total_messages=total_messages,
+                          unique_users=unique_users,
+                          businesses=businesses)
+
+@app.route('/admin/toggle/<int:business_id>', methods=['POST'])
+def admin_toggle_bot(business_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    with get_db() as conn:
+        current = conn.execute("SELECT is_active FROM businesses WHERE id = ?", (business_id,)).fetchone()
+        if not current:
+            return jsonify({"error": "Business not found"}), 404
+        
+        new_status = 0 if current[0] else 1
+        conn.execute("UPDATE businesses SET is_active = ? WHERE id = ?", (new_status, business_id))
+        conn.commit()
+    
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/delete/<int:business_id>', methods=['POST'])
+def admin_delete_business(business_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    with get_db() as conn:
+        conn.execute("DELETE FROM messages WHERE business_id = ?", (business_id,))
+        conn.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
+        conn.commit()
+    
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/business/<int:business_id>')
+def admin_business_messages(business_id):
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    with get_db() as conn:
+        business = conn.execute("SELECT * FROM businesses WHERE id = ?", (business_id,)).fetchone()
+        messages = conn.execute("""
+            SELECT * FROM messages 
+            WHERE business_id = ? 
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        """, (business_id,)).fetchall()
+    
+    return render_template('admin_business.html', business=business, messages=messages)
+
 # ---------- STARTUP ----------
 if __name__ == '__main__':
     init_db()
@@ -376,5 +488,6 @@ if __name__ == '__main__':
         for row in rows:
             start_bot_thread(row['bot_token'], row['id'])
     print("🌐 Web server running...")
+    print("🔑 Admin Login: /admin/login")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

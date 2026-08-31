@@ -1,0 +1,2 @@
+Ngrok Auth Token :3HQacBO9nXDnO9YSMsR3TVxG4aP_6ZEgi9BM63DWzGkWmTRgu 
+URL FOR META WEB HOOK :https://grief-cricket-worried.ngrok-free.dev forwarding url
