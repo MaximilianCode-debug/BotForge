@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ business.business_name }} - Messages</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .navbar { background: #1a1a2e !important; }
+        .navbar-brand { color: white !important; font-weight: 700; }
+        .navbar a { color: rgba(255,255,255,0.7) !important; }
+        .navbar a:hover { color: white !important; }
+        .message-item { border-bottom: 1px solid #eee; padding: 10px 0; }
+        .message-item:last-child { border-bottom: none; }
+        .badge-active { background: #28a745; color: white; padding: 5px 10px; border-radius: 12px; }
+        .badge-inactive { background: #dc3545; color: white; padding: 5px 10px; border-radius: 12px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/admin/dashboard">
+                <i class="fas fa-robot me-2"></i>BotForge Admin
+            </a>
+            <a href="/admin/dashboard" class="text-light">
+                <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+            </a>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-body">
+                <h4>{{ business.business_name }}</h4>
+                <p class="text-muted small">
+                    <i class="fas fa-tag me-1"></i>Token: {{ business.bot_token[:20] }}...<br>
+                    <i class="fas fa-calendar me-1"></i>Created: {{ business.created_at }}<br>
+                    <i class="fas fa-{{ 'check-circle text-success' if business.is_active else 'times-circle text-danger' }}"></i>
+                    Status: <span class="badge {% if business.is_active %}badge-active{% else %}badge-inactive{% endif %}">
+                        {{ "Active" if business.is_active else "Inactive" }}
+                    </span>
+                </p>
+            </div>
+        </div>
+
+        <h5><i class="fas fa-inbox me-2"></i>Recent Messages (Last 100)</h5>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {% for msg in messages %}
+                <div class="message-item">
+                    <div class="d-flex justify-content-between text-muted small">
+                        <span>
+                            {% if msg.direction == 'incoming' %}
+                                <i class="fas fa-arrow-right text-primary"></i> User
+                            {% else %}
+                                <i class="fas fa-arrow-left text-success"></i> Bot
+                            {% endif %}
+                        </span>
+                        <span>{{ msg.timestamp }}</span>
+                    </div>
+                    <div class="mt-1">
+                        {% if msg.user_message %}
+                            <strong>Q:</strong> {{ msg.user_message }}
+                        {% endif %}
+                        {% if msg.bot_response %}
+                            <br><strong>A:</strong> {{ msg.bot_response }}
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-muted text-center">No messages yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>
