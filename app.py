@@ -1,4 +1,4 @@
-import os
+ import os
 import sqlite3
 import threading
 import asyncio
@@ -14,7 +14,6 @@ load_dotenv()
 
 # ---------- CONFIG ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# FIXED: Use the correct, currently supported model
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 if not GROQ_API_KEY:
@@ -34,7 +33,6 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
-        # Businesses table with password field
         conn.execute('''
             CREATE TABLE IF NOT EXISTS businesses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,11 +45,10 @@ def init_db():
                 is_active BOOLEAN DEFAULT 1
             )
         ''')
-        # Add password column if it doesn't exist (for existing databases)
         try:
             conn.execute("ALTER TABLE businesses ADD COLUMN password TEXT")
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS messages (
@@ -199,7 +196,6 @@ async def ask_groq(messages: list, business_context: str) -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        # Better error messages for common issues
         if "rate_limit" in str(e).lower() or "429" in str(e):
             return "⏳ We're getting too many messages right now. Please wait a moment and try again."
         elif "decommissioned" in str(e).lower() or "model" in str(e).lower():
@@ -416,19 +412,25 @@ def admin_dashboard():
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
     
-    with get_db() as conn:
-        total_businesses = conn.execute("SELECT COUNT(*) FROM businesses").fetchone()[0]
-        active_businesses = conn.execute("SELECT COUNT(*) FROM businesses WHERE is_active = 1").fetchone()[0]
-        total_messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        unique_users = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM messages").fetchone()[0]
-        businesses = conn.execute("""
-            SELECT b.*, 
-                   (SELECT COUNT(*) FROM messages WHERE business_id = b.id) as message_count,
-                   (SELECT COUNT(DISTINCT chat_id) FROM messages WHERE business_id = b.id) as user_count
-            FROM businesses b
-            ORDER BY b.id DESC
-        """).fetchall()
-    
+    try:
+        with get_db() as conn:
+            total_businesses = conn.execute("SELECT COUNT(*) FROM businesses").fetchone()[0]
+            active_businesses = conn.execute("SELECT COUNT(*) FROM businesses WHERE is_active = 1").fetchone()[0]
+            total_messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            unique_users = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM messages").fetchone()[0]
+            businesses = conn.execute("""
+                SELECT b.*, 
+                       (SELECT COUNT(*) FROM messages WHERE business_id = b.id) as message_count,
+                       (SELECT COUNT(DISTINCT chat_id) FROM messages WHERE business_id = b.id) as user_count
+                FROM businesses b
+                ORDER BY b.id DESC
+            """).fetchall()
+    except Exception as e:
+        print(f"❌ Admin dashboard error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error: {e}", 500
+
     return render_template('admin_dashboard.html', 
                           total_businesses=total_businesses,
                           active_businesses=active_businesses,
@@ -441,14 +443,18 @@ def admin_toggle_bot(business_id):
     if not session.get('admin_logged_in'):
         return jsonify({"error": "Unauthorized"}), 401
     
-    with get_db() as conn:
-        current = conn.execute("SELECT is_active FROM businesses WHERE id = ?", (business_id,)).fetchone()
-        if not current:
-            return jsonify({"error": "Business not found"}), 404
-        
-        new_status = 0 if current[0] else 1
-        conn.execute("UPDATE businesses SET is_active = ? WHERE id = ?", (new_status, business_id))
-        conn.commit()
+    try:
+        with get_db() as conn:
+            current = conn.execute("SELECT is_active FROM businesses WHERE id = ?", (business_id,)).fetchone()
+            if not current:
+                return jsonify({"error": "Business not found"}), 404
+            
+            new_status = 0 if current[0] else 1
+            conn.execute("UPDATE businesses SET is_active = ? WHERE id = ?", (new_status, business_id))
+            conn.commit()
+    except Exception as e:
+        print(f"❌ Toggle error: {e}")
+        return jsonify({"error": str(e)}), 500
     
     return redirect(url_for('admin_dashboard'))
 
@@ -457,10 +463,14 @@ def admin_delete_business(business_id):
     if not session.get('admin_logged_in'):
         return jsonify({"error": "Unauthorized"}), 401
     
-    with get_db() as conn:
-        conn.execute("DELETE FROM messages WHERE business_id = ?", (business_id,))
-        conn.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
-        conn.commit()
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM messages WHERE business_id = ?", (business_id,))
+            conn.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"❌ Delete error: {e}")
+        return jsonify({"error": str(e)}), 500
     
     return redirect(url_for('admin_dashboard'))
 
@@ -469,16 +479,31 @@ def admin_business_messages(business_id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
     
-    with get_db() as conn:
-        business = conn.execute("SELECT * FROM businesses WHERE id = ?", (business_id,)).fetchone()
-        messages = conn.execute("""
-            SELECT * FROM messages 
-            WHERE business_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT 100
-        """, (business_id,)).fetchall()
+    try:
+        with get_db() as conn:
+            business = conn.execute("SELECT * FROM businesses WHERE id = ?", (business_id,)).fetchone()
+            messages = conn.execute("""
+                SELECT * FROM messages 
+                WHERE business_id = ? 
+                ORDER BY timestamp DESC 
+                LIMIT 100
+            """, (business_id,)).fetchall()
+    except Exception as e:
+        print(f"❌ Business view error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error: {e}", 500
     
     return render_template('admin_business.html', business=business, messages=messages)
+
+# ---------- DATABASE INITIALIZER ----------
+@app.route('/init-db')
+def force_init_db():
+    try:
+        init_db()
+        return "✅ Database initialized successfully! Tables created."
+    except Exception as e:
+        return f"❌ Error: {e}"
 
 # ---------- STARTUP ----------
 if __name__ == '__main__':
@@ -489,5 +514,6 @@ if __name__ == '__main__':
             start_bot_thread(row['bot_token'], row['id'])
     print("🌐 Web server running...")
     print("🔑 Admin Login: /admin/login")
+    print("📊 Admin Dashboard: /admin/dashboard")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
